@@ -16,13 +16,14 @@ from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QTableWidget, QAbstractItemView, QWidget,
     QHBoxLayout, QLabel, QMessageBox, QWizard, QWizardPage, QListWidget,
-    QListWidgetItem, QHeaderView
+    QListWidgetItem, QHeaderView, QScrollArea
 )
 
 from electrumsv.app_state import app_state
 from electrumsv.i18n import _
 from electrumsv.logs import logs
 from electrumsv.storage import WalletStorage
+from electrumsv.version import PACKAGE_VERSION
 
 from .password_dialog import PasswordDialog
 from .util import icon_path, read_QIcon
@@ -31,7 +32,7 @@ logger = logs.get_logger('wallet_wizard')
 
 
 def open_wallet_wizard():
-    wizard_window = WalletWizard2()
+    wizard_window = WalletWizard(is_startup=True)
     result = wizard_window.run()
 
     if result != QDialog.Accepted:
@@ -73,12 +74,14 @@ def open_wallet_wizard():
 
 
 class Pages(enum.IntEnum):
-    SELECT_WALLET = 1
-    ADD_WALLET_MENU = 2
-    CREATE_NEW_STANDARD_WALLET = 3
-    CREATE_NEW_MULTISIG_WALLET = 4
-    IMPORT_WALLET_FILE = 5
-    IMPORT_WALLET_TEXT = 6
+    SPLASH_SCREEN = 1
+    RELEASE_NOTES = 2
+    SELECT_WALLET = 11
+    ADD_WALLET_MENU = 12
+    CREATE_NEW_STANDARD_WALLET = 13
+    CREATE_NEW_MULTISIG_WALLET = 14
+    IMPORT_WALLET_FILE = 15
+    IMPORT_WALLET_TEXT = 16
     IMPORT_WALLET_TEXT_SEED_PHRASE_CENTBEE = 41
     IMPORT_WALLET_TEXT_SEED_PHRASE_HANDCASH = 42
     IMPORT_WALLET_TEXT_SEED_PHRASE_MONEYBUTTON = 43
@@ -88,21 +91,33 @@ class Pages(enum.IntEnum):
     IMPORT_HARDWARE_WALLET_FOR_TREZOR = 54
 
 
-class WalletWizard2(QWizard):
-    def __init__(self):
-        super().__init__(None)
+class WalletWizard(QWizard):
+    _last_page_id = None
 
-        self.setWindowTitle('ElectrumSV')
-        self.setMinimumSize(600, 600)
-        self.setOption(QWizard.NoDefaultButton, True)
+    def __init__(self, is_startup=False):
+        super().__init__(None)
 
         self.wallet_data = None
 
-        self.setOption(QWizard.HaveHelpButton, True)
+        self.setWindowTitle('ElectrumSV')
+        self.setMinimumSize(600, 600)
+        self.setOption(QWizard.IndependentPages, False)
+        self.setOption(QWizard.NoDefaultButton, True)
+        # TODO: implement consistent help
+        self.setOption(QWizard.HaveHelpButton, False)
+        self.setOption(QWizard.HaveCustomButton1, True)
+
+        self.setPage(Pages.SPLASH_SCREEN, SplashScreenPage(self))
+        self.setPage(Pages.RELEASE_NOTES, ReleaseNotesPage(self))
         self.setPage(Pages.SELECT_WALLET, SelectWalletWizardPage(self))
         self.setPage(Pages.ADD_WALLET_MENU, AddWalletWizardPage(self))
 
-        self.setStartId(Pages.SELECT_WALLET)
+        self.currentIdChanged.connect(self.on_current_id_changed)
+
+        if is_startup:
+            self.setStartId(Pages.SPLASH_SCREEN)
+        else:
+            self.setStartId(Pages.SELECT_WALLET)
 
     def run(self):
         self.ensure_shown()
@@ -121,8 +136,107 @@ class WalletWizard2(QWizard):
             self.wallet_data = page.get_wallet_data()
         super().accept()
 
+    def on_current_id_changed(self, page_id):
+        if self._last_page_id is not None:
+            page = self.page(self._last_page_id)
+            if hasattr(page, "on_leave"):
+                page.on_leave()
+
+        self._last_page_id = page_id
+        page = self.page(page_id)
+        if hasattr(page, "on_enter"):
+            page.on_enter()
+        else:
+            button = self.button(QWizard.CustomButton1)
+            button.setVisible(False)
+
 
 wallet_table = None
+
+
+class SplashScreenPage(QWizardPage):
+    _next_page_id = None
+
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        layout = QVBoxLayout()
+        logo_layout = QHBoxLayout()
+        logo_label = QLabel()
+        logo_label.setPixmap(QPixmap(icon_path("title_logo.png"))
+            .scaledToWidth(500, Qt.SmoothTransformation))
+        logo_layout.addStretch(1)
+        logo_layout.addWidget(logo_label)
+        logo_layout.addStretch(1)
+        layout.addLayout(logo_layout)
+        version_label = QLabel(f"<b><big>v{PACKAGE_VERSION}</big></b>")
+        version_label.setAlignment(Qt.AlignHCenter)
+        version_label.setTextFormat(Qt.RichText)
+        layout.addWidget(version_label)
+        layout.addStretch(1)
+        release_label = QLabel("<big>"+
+            _("Bitcoin SV is the only Bitcoin that follows "+
+            "the original whitepaper<br/> and values being stable and non-experimental.") +
+            "</big>")
+        release_label.setAlignment(Qt.AlignHCenter)
+        release_label.setWordWrap(True)
+        layout.addWidget(release_label)
+        layout.addStretch(1)
+
+        self.setLayout(layout)
+
+        self._on_reset_next_page()
+
+    def _on_reset_next_page(self):
+        self._next_page_id = Pages.SELECT_WALLET
+
+    def _on_release_notes_clicked(self, *checked):
+        # Change the page to the release notes page by intercepting nextId.
+        self._next_page_id = Pages.RELEASE_NOTES
+        self.wizard().next()
+
+    def nextId(self):
+        return self._next_page_id
+
+    def on_enter(self):
+        self._on_reset_next_page()
+
+        button = self.wizard().button(QWizard.CustomButton1)
+        button.setVisible(True)
+        button.setText("    "+ _("Release notes") +"    ")
+        button.setContentsMargins(10, 0, 10, 0)
+        button.clicked.connect(self._on_release_notes_clicked)
+
+    def on_leave(self):
+        button = self.wizard().button(QWizard.CustomButton1)
+        button.clicked.disconnect()
+
+
+class ReleaseNotesPage(QWizardPage):
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self.setTitle(_("Release Notes"))
+
+        # TODO: Relocate the release note text from dialogs.
+        # TODO: Make it look better and more readable, currently squashed horizontally.
+        from .dialogs import raw_release_notes
+
+        notes_label = QLabel("<ul>"+ raw_release_notes +"</ul>")
+        notes_label.setTextFormat(Qt.RichText)
+        notes_label.setWordWrap(True)
+        #notes_label.setContentsMargins(10, 10, 10, 10)
+
+        scroll = QScrollArea()
+        scroll.setWidget(notes_label)
+
+        layout = QVBoxLayout()
+        layout.addWidget(scroll)
+        self.setLayout(layout)
+
+    def nextId(self):
+        return Pages.SELECT_WALLET
+
 
 class SelectWalletWizardPage(QWizardPage):
     def __init__(self, parent):
