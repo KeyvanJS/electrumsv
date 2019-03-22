@@ -16,7 +16,7 @@ from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QTableWidget, QAbstractItemView, QWidget,
     QHBoxLayout, QLabel, QMessageBox, QWizard, QWizardPage, QListWidget,
-    QListWidgetItem, QHeaderView, QScrollArea
+    QListWidgetItem, QHeaderView, QScrollArea, QTextBrowser
 )
 
 from electrumsv.app_state import app_state
@@ -174,10 +174,17 @@ class SplashScreenPage(QWizardPage):
         version_label.setTextFormat(Qt.RichText)
         layout.addWidget(version_label)
         layout.addStretch(1)
-        release_label = QLabel("<big>"+
+        release_text = (
+            "<big>"+
+            "<p>"+
+            _("ElectrumSV is a lightweight SPV wallet for Bitcoin SV.") +
+            "</p>"+
+            "<p>"+
             _("Bitcoin SV is the only Bitcoin that follows "+
             "the original whitepaper<br/> and values being stable and non-experimental.") +
+            "</p>"+
             "</big>")
+        release_label = QLabel(release_text)
         release_label.setAlignment(Qt.AlignHCenter)
         release_label.setWordWrap(True)
         layout.addWidget(release_label)
@@ -221,17 +228,15 @@ class ReleaseNotesPage(QWizardPage):
         # TODO: Relocate the release note text from dialogs.
         # TODO: Make it look better and more readable, currently squashed horizontally.
         from .dialogs import raw_release_notes
+        notes_text = raw_release_notes.replace(
+            "</li><li>", "<br/><br/>").replace("</li>", "").replace("<li>", "")
 
-        notes_label = QLabel("<ul>"+ raw_release_notes +"</ul>")
-        notes_label.setTextFormat(Qt.RichText)
-        notes_label.setWordWrap(True)
-        #notes_label.setContentsMargins(10, 10, 10, 10)
-
-        scroll = QScrollArea()
-        scroll.setWidget(notes_label)
+        widget = QTextBrowser()
+        widget.setAcceptRichText(True)
+        widget.setHtml(notes_text)
 
         layout = QVBoxLayout()
-        layout.addWidget(scroll)
+        layout.addWidget(widget)
         self.setLayout(layout)
 
     def nextId(self):
